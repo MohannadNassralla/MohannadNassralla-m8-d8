@@ -1,0 +1,68 @@
+name: Drill 8 — RAG Basics Autograder
+on:
+  push:
+    branches-ignore: []
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      weaviate:
+        image: semitechnologies/weaviate:1.24.10
+        ports:
+          - 8080:8080
+        env:
+          QUERY_DEFAULTS_LIMIT: 25
+          AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
+          PERSISTENCE_DATA_PATH: /var/lib/weaviate
+          DEFAULT_VECTORIZER_MODULE: none
+          ENABLE_MODULES: ''
+          CLUSTER_HOSTNAME: node1
+        options: >-
+          --health-cmd "wget -q -O - http://localhost:8080/v1/.well-known/ready || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      WEAVIATE_URL: http://localhost:8080
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Cache Hugging Face hub
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ runner.os }}-minilm-l6-v2
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install -r requirements.txt
+
+      - name: Wait for Weaviate
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/v1/.well-known/ready; then
+              echo "Weaviate ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "Weaviate failed to come up"; exit 1
+
+      - name: Run autograder tests
+        run: pytest tests/ -v --tb=short
